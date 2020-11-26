@@ -1,0 +1,373 @@
+diff --git a/intern/cycles/blender/addon/properties.py b/intern/cycles/blender/addon/properties.py
+index 22b8825ec95..d29f709263e 100644
+--- a/intern/cycles/blender/addon/properties.py
++++ b/intern/cycles/blender/addon/properties.py
+@@ -75,7 +75,6 @@ enum_panorama_types = (
+     ('FISHEYE_EQUISOLID', "Fisheye Equisolid",
+                           "Similar to most fisheye modern lens, takes sensor dimensions into consideration"),
+     ('MIRRORBALL', "Mirror Ball", "Uses the mirror ball mapping"),
+-    ('KANNALA_BRANDT_4', "Kannala Brandt 4", "Uses the Kannala Brandt 4 model"),
+ )
+ 
+ enum_curve_shape = (
+@@ -935,62 +934,7 @@ class CyclesCameraSettings(bpy.types.PropertyGroup):
+         subtype='ANGLE',
+         default=pi,
+     )
+-    k0: FloatProperty(
+-        name="k0",
+-        description="K0 for KB4",
+-        min=-10, max=10,
+-        subtype='FACTOR',
+-        default=0.0,
+-    )
+-    k1: FloatProperty(
+-        name="k1",
+-        description="K1 for KB4",
+-        min=-10, max=10,
+-        subtype='FACTOR',
+-        default=0.0,
+-    )
+-    k2: FloatProperty(
+-        name="k2",
+-        description="K2 for KB4",
+-        min=-10, max=10,
+-        subtype='FACTOR',
+-        default=0.0,
+-    )
+-    k3: FloatProperty(
+-        name="k3",
+-        description="K3 for KB4",
+-        min=-10, max=10,
+-        subtype='FACTOR',
+-        default=0.0,
+-    )
+-    fu: FloatProperty(
+-        name="fu",
+-        description="Focal Length along x-axis",
+-        min=100, max=10000,
+-        subtype='PIXEL',
+-        default=1920,
+-    )
+-    fv: FloatProperty(
+-        name="fv",
+-        description="Focal Length along y-axis",
+-        min=100, max=10000,
+-        subtype='PIXEL',
+-        default=1080,
+-    )
+-    cu: FloatProperty(
+-        name="cu",
+-        description="Optical Centre along x-axis",
+-        min=-10000, max=10000,
+-        subtype='PIXEL',
+-        default=960,
+-    )
+-    cv: FloatProperty(
+-        name="cv",
+-        description="Optical Centre along y-axis",
+-        min=-10000, max=10000,
+-        subtype='PIXEL',
+-        default=540,
+-    )
++
+     @classmethod
+     def register(cls):
+         bpy.types.Camera.cycles = PointerProperty(
+diff --git a/intern/cycles/blender/blender_camera.cpp b/intern/cycles/blender/blender_camera.cpp
+index 9d713fc3d6c..e1ab3b3fbc1 100644
+--- a/intern/cycles/blender/blender_camera.cpp
++++ b/intern/cycles/blender/blender_camera.cpp
+@@ -62,8 +62,6 @@ struct BlenderCamera {
+   float latitude_max;
+   float longitude_min;
+   float longitude_max;
+-  float k0, k1, k2, k3, fu, fv, cu, cv;
+-
+   bool use_spherical_stereo;
+   float interocular_distance;
+   float convergence_distance;
+@@ -196,14 +194,6 @@ static void blender_camera_from_object(BlenderCamera *bcam,
+     bcam->latitude_max = RNA_float_get(&ccamera, "latitude_max");
+     bcam->longitude_min = RNA_float_get(&ccamera, "longitude_min");
+     bcam->longitude_max = RNA_float_get(&ccamera, "longitude_max");
+-    bcam->k0 = RNA_float_get(&ccamera, "k0");
+-    bcam->k1 = RNA_float_get(&ccamera, "k1");
+-    bcam->k2 = RNA_float_get(&ccamera, "k2");
+-    bcam->k3 = RNA_float_get(&ccamera, "k3");
+-    bcam->cu = RNA_float_get(&ccamera, "cu");
+-    bcam->cv = RNA_float_get(&ccamera, "cv");
+-    bcam->fu = RNA_float_get(&ccamera, "fu");
+-    bcam->fv = RNA_float_get(&ccamera, "fv");
+ 
+     bcam->interocular_distance = b_camera.stereo().interocular_distance();
+     if (b_camera.stereo().convergence_mode() == BL::CameraStereoData::convergence_mode_PARALLEL) {
+@@ -458,15 +448,6 @@ static void blender_camera_sync(Camera *cam,
+   cam->longitude_min = bcam->longitude_min;
+   cam->longitude_max = bcam->longitude_max;
+ 
+-  cam->k0 = bcam->k0;
+-  cam->k1 = bcam->k1;
+-  cam->k2 = bcam->k2;
+-  cam->k3 = bcam->k3;
+-  cam->fu = bcam->fu;
+-  cam->fv = bcam->fv;
+-  cam->cu = bcam->cu;
+-  cam->cv = bcam->cv;
+-
+   /* panorama stereo */
+   cam->interocular_distance = bcam->interocular_distance;
+   cam->convergence_distance = bcam->convergence_distance;
+diff --git a/intern/cycles/kernel/kernel_camera.h b/intern/cycles/kernel/kernel_camera.h
+index b4694e4533c..efe46d5b0dd 100644
+--- a/intern/cycles/kernel/kernel_camera.h
++++ b/intern/cycles/kernel/kernel_camera.h
+@@ -290,20 +290,9 @@ ccl_device_inline void camera_sample_panorama(ccl_constant KernelCamera *cam,
+   }
+ #endif
+ 
+-  // float3 D_bfore_normalize = D;
+   P = transform_point(&cameratoworld, P);
+   D = normalize(transform_direction(&cameratoworld, D));
+ 
+-  // printf("Camera Type: %d\n", cam->panorama_type);
+-  // print_projection("raster to camera projection", rastertocamera);
+-  // print_float3("Position of camera", P);
+-  // print_float3("Position of camera in world", Pcamera);
+-  // print_float3("Direction of ray", D);
+-  // print_float3("Dir of ray in camera frame", D_bfore_normalize);
+-  // print_float2("raster xy", make_float2(raster_x, raster_y));
+-  // print_transform("camera to world", cameratoworld);
+-
+-
+   /* Stereo transform */
+   bool use_stereo = cam->interocular_offset != 0.0f;
+   if (use_stereo) {
+diff --git a/intern/cycles/kernel/kernel_projection.h b/intern/cycles/kernel/kernel_projection.h
+index a0aaa3a5f7a..f74ced45fd5 100644
+--- a/intern/cycles/kernel/kernel_projection.h
++++ b/intern/cycles/kernel/kernel_projection.h
+@@ -164,9 +164,8 @@ ccl_device float3 mirrorball_to_direction(float u, float v)
+ 
+   /* reflection */
+   float3 I = make_float3(0.0f, -1.0f, 0.0f);
+-  I = 2.0f * dot(dir, I) * dir - I;
+ 
+-  return I;
++  return 2.0f * dot(dir, I) * dir - I;
+ }
+ 
+ ccl_device float2 direction_to_mirrorball(float3 dir)
+@@ -184,78 +183,6 @@ ccl_device float2 direction_to_mirrorball(float3 dir)
+   return make_float2(u, v);
+ }
+ 
+-ccl_device float3 kb4_to_direction(float u,
+-                                   float v,
+-                                   float k0,
+-                                   float k1,
+-                                   float k2,
+-                                   float k3,
+-                                   float fu,
+-                                   float fv,
+-                                   float cu,
+-                                   float cv)
+-{
+-  const float un = u - cu;
+-  const float vn = v - cv;
+-  const float psi = atan2f(fu * vn, fv * un);
+-
+-  const float rth = un / (fu * cosf(psi));
+-
+-  // Use Newtons method to solve for theta.
+-  float th = rth;
+-#pragma unroll
+-  for (int i = 0; i < 5; i++) {
+-    // f = (th + k0*th**3 + k1*th**5 + k2*th**7 + k3*th**9 - rth)^2
+-    const float th2 = th * th;
+-    const float th3 = th2 * th;
+-    const float th4 = th2 * th2;
+-    const float th6 = th4 * th2;
+-    const float x0 = k0 * th3 + k1 * th4 * th + k2 * th6 * th + k3 * th6 * th3 - rth + th;
+-    const float x1 = 3 * k0 * th2 + 5 * k1 * th4 + 7 * k2 * th6 + 9 * k3 * th6 * th2 + 1;
+-    const float d = 2 * x0 * x1;
+-    const float d2 = 4 * th * x0 * (3 * k0 + 10 * k1 * th2 + 21 * k2 * th4 + 36 * k3 * th6) +
+-                     2 * x1 * x1;
+-    const float delta = d / d2;
+-    th -= delta;
+-  }
+-
+-  float x = sinf(th) * cosf(psi);
+-  float y = sinf(th) * sinf(psi);
+-  float z = cosf(th);
+-
+-  float3 ray = make_float3(z, -x, -y);
+-  // print_float2("KB4 uv", make_float2(u, v));
+-  // print_float3("KB4 to dir", ray);
+-  return ray;
+-}
+-
+-ccl_device float2 direction_to_kb4(float r_x,
+-                                   float r_y,
+-                                   float r_z,
+-                                   float k0,
+-                                   float k1,
+-                                   float k2,
+-                                   float k3,
+-                                   float fu,
+-                                   float fv,
+-                                   float cu,
+-                                   float cv)
+-{
+-  const float Xsq_plus_Ysq = r_x * r_x + r_y * r_y;
+-  const float theta = atan2f(sqrtf(Xsq_plus_Ysq), r_z);
+-  const float psi = atan2f(r_y, r_x);
+-
+-  const float theta2 = theta * theta;
+-  const float theta3 = theta2 * theta;
+-  const float theta5 = theta3 * theta2;
+-  const float theta7 = theta5 * theta2;
+-  const float theta9 = theta7 * theta2;
+-  const float r = theta + k0 * theta3 + k1 * theta5 + k2 * theta7 + k3 * theta9;
+-
+-  float2 uv = make_float2(fu * r * cosf(psi) + cu, fv * r * sinf(psi) + cv); 
+-  return uv;
+-}
+-
+ ccl_device_inline float3 panorama_to_direction(ccl_constant KernelCamera *cam, float u, float v)
+ {
+   switch (cam->panorama_type) {
+@@ -265,9 +192,6 @@ ccl_device_inline float3 panorama_to_direction(ccl_constant KernelCamera *cam, f
+       return mirrorball_to_direction(u, v);
+     case PANORAMA_FISHEYE_EQUIDISTANT:
+       return fisheye_to_direction(u, v, cam->fisheye_fov);
+-    case PANORAMA_KB4:
+-      return kb4_to_direction(
+-          u*cam->width, (1.f - v)*cam->height, cam->k0, cam->k1, cam->k2, cam->k3, cam->fu, cam->fv, cam->cu, cam->cv);
+     case PANORAMA_FISHEYE_EQUISOLID:
+     default:
+       return fisheye_equisolid_to_direction(
+@@ -284,18 +208,6 @@ ccl_device_inline float2 direction_to_panorama(ccl_constant KernelCamera *cam, f
+       return direction_to_mirrorball(dir);
+     case PANORAMA_FISHEYE_EQUIDISTANT:
+       return direction_to_fisheye(dir, cam->fisheye_fov);
+-    case PANORAMA_KB4:
+-      return direction_to_kb4(dir.x,
+-                              dir.y,
+-                              dir.z,
+-                              cam->k0,
+-                              cam->k1,
+-                              cam->k2,
+-                              cam->k3,
+-                              cam->fu,
+-                              cam->fv,
+-                              cam->cu,
+-                              cam->cv);
+     case PANORAMA_FISHEYE_EQUISOLID:
+     default:
+       return direction_to_fisheye_equisolid(
+diff --git a/intern/cycles/kernel/kernel_types.h b/intern/cycles/kernel/kernel_types.h
+index c53bab2a516..77e134da4b0 100644
+--- a/intern/cycles/kernel/kernel_types.h
++++ b/intern/cycles/kernel/kernel_types.h
+@@ -622,7 +622,6 @@ enum PanoramaType {
+   PANORAMA_FISHEYE_EQUIDISTANT = 1,
+   PANORAMA_FISHEYE_EQUISOLID = 2,
+   PANORAMA_MIRRORBALL = 3,
+-  PANORAMA_KB4 = 4,
+ 
+   PANORAMA_NUM_TYPES,
+ };
+@@ -1124,14 +1123,6 @@ typedef struct KernelCamera {
+   int panorama_type;
+   float fisheye_fov;
+   float fisheye_lens;
+-  float k0;
+-  float k1;
+-  float k2;
+-  float k3;
+-  float fu;
+-  float fv;
+-  float cu;
+-  float cv;
+   float4 equirectangular_range;
+ 
+   /* stereo */
+diff --git a/intern/cycles/render/camera.cpp b/intern/cycles/render/camera.cpp
+index c0a15bfd781..ee68c9ede22 100644
+--- a/intern/cycles/render/camera.cpp
++++ b/intern/cycles/render/camera.cpp
+@@ -408,14 +408,6 @@ void Camera::update(Scene *scene)
+   kcam->panorama_type = panorama_type;
+   kcam->fisheye_fov = fisheye_fov;
+   kcam->fisheye_lens = fisheye_lens;
+-  kcam->k0 = k0;
+-  kcam->k1 = k1;
+-  kcam->k2 = k2;
+-  kcam->k3 = k3;
+-  kcam->fu = fu;
+-  kcam->fv = fv;
+-  kcam->cu = cu;
+-  kcam->cv = cv;
+   kcam->equirectangular_range = make_float4(longitude_min - longitude_max,
+                                             -longitude_min,
+                                             latitude_min - latitude_max,
+diff --git a/intern/cycles/render/camera.h b/intern/cycles/render/camera.h
+index 07bbeb667a0..0e91fa44a5b 100644
+--- a/intern/cycles/render/camera.h
++++ b/intern/cycles/render/camera.h
+@@ -104,14 +104,6 @@ class Camera : public Node {
+   float latitude_max;
+   float longitude_min;
+   float longitude_max;
+-  float k0;
+-  float k1;
+-  float k2;
+-  float k3;
+-  float fu;
+-  float fv;
+-  float cu;
+-  float cv;
+ 
+   /* panorama stereo */
+   StereoEye stereo_eye;
+diff --git a/release/scripts/startup/bl_ui/properties_data_camera.py b/release/scripts/startup/bl_ui/properties_data_camera.py
+index 394bdb7a05a..b56182bb637 100644
+--- a/release/scripts/startup/bl_ui/properties_data_camera.py
++++ b/release/scripts/startup/bl_ui/properties_data_camera.py
+@@ -110,20 +110,6 @@ class DATA_PT_lens(CameraButtonsPanel, Panel):
+                     sub = col.column(align=True)
+                     sub.prop(ccam, "longitude_min", text="Longitude Min")
+                     sub.prop(ccam, "longitude_max", text="Max")
+-                elif ccam.panorama_type == 'KANNALA_BRANDT_4':
+-                    sub = col.column(align=True)
+-                    sub.label(text="Constants:")
+-                    sub.prop(ccam, "k0")
+-                    sub.prop(ccam, "k1")
+-                    sub.prop(ccam, "k2")
+-                    sub.prop(ccam, "k3")
+-                    sub = col.column(align=True)
+-                    sub.label(text="Pinhole Intrinsics:")
+-                    sub.prop(ccam, "fu", text="Focal length X")
+-                    sub.prop(ccam, "fv", text="Y")
+-                    sub.prop(ccam, "cu", text="Camera Center X")
+-                    sub.prop(ccam, "cv", text="Y")
+-
+             elif engine in {'BLENDER_RENDER', 'BLENDER_EEVEE', 'BLENDER_WORKBENCH'}:
+                 if cam.lens_unit == 'MILLIMETERS':
+                     col.prop(cam, "lens")
+@@ -134,11 +120,9 @@ class DATA_PT_lens(CameraButtonsPanel, Panel):
+         col = layout.column()
+         col.separator()
+ 
+-        ccam = cam.cycles
+-        if not ccam.panorama_type == 'KANNALA_BRANDT_4':
+-            sub = col.column(align=True)
+-            sub.prop(cam, "shift_x", text="Shift X")
+-            sub.prop(cam, "shift_y", text="Y")
++        sub = col.column(align=True)
++        sub.prop(cam, "shift_x", text="Shift X")
++        sub.prop(cam, "shift_y", text="Y")
+ 
+         col.separator()
+         sub = col.column(align=True)
